@@ -18,7 +18,8 @@ This project demonstrates a data engineering pipeline designed on CentOS 6.5 wit
 - **InfluxDB**: Stores processed data for analytics and visualization on the cloud.
 - **Grafana Cloud**:  Provides a platform for visualizing and analyzing data stored in InfluxDB, enabling the creation of interactive dashboards and reports to monitor user metrics and trends in real-time.
 
-![Project Architecture Diagram]<img width="959" alt="image" src="https://github.com/user-attachments/assets/f2a09030-fb86-46e6-9343-c63471f54db3">)
+[Project Architecture Diagram]
+<img width="959" alt="image" src="https://github.com/user-attachments/assets/f2a09030-fb86-46e6-9343-c63471f54db3">
 
 ---
 
@@ -394,7 +395,8 @@ Follow the [InfluxDB installation guide](https://docs.influxdata.com/influxdb/cl
    
    Check your InfluxDB Cloud dashboard to ensure data is being written to your specified bucket.
    
-![InfluxDB Results]<img width="944" alt="image" src="https://github.com/user-attachments/assets/7cb76155-e105-4adc-8429-58bf228a5566">)
+[InfluxDB Results]
+<img width="944" alt="image" src="https://github.com/user-attachments/assets/7cb76155-e105-4adc-8429-58bf228a5566">
 
 ---
 ## Data Analysis & Visualization with Grafana
@@ -411,7 +413,8 @@ To visualize and analyze the data ingested into InfluxDB Cloud, I utilized **Gra
 
 By leveraging Grafana, I was able to enhance the analytical capabilities of my project, making the data not only accessible but also actionable.
 
-![Grafana Results]<img width="946" alt="image" src="https://github.com/user-attachments/assets/0e9c4a6a-7c00-44ba-9188-5db7ae2b8e0d">)
+[Grafana Results]
+<img width="946" alt="image" src="https://github.com/user-attachments/assets/0e9c4a6a-7c00-44ba-9188-5db7ae2b8e0d">
 
 
 ---
