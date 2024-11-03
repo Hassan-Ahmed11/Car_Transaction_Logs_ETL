@@ -4,21 +4,21 @@
 This project demonstrates a data engineering pipeline designed on CentOS 6.5 with Hadoop and other Big Data tools. The pipeline pulls data from an external API, processes it in real-time, and stores it in a cloud database.
 
 **Pipeline Summary:**
-1. **Data Collection**: A Python script pulls user data from [RandomUser API](https://randomuser.me/api).
-2. **Ingestion**: Apache Flume ingests the data and sends it to Apache Kafka.
+1. **Data Collection**: A Python script pulls user data from a python script that generates car transactions logs.
+2. **Ingestion**: The python script make a kafka topic then ingests the data and sends it to Apache Kafka.
 4. **Storage & Processing**: Flume transfers a copy of the data from Kafka (as a consumer) to HDFS, while Spark processes data from Kafka (as a consumer) in real-time.
 5. **Storage in Cloud**: Processed data is stored in InfluxDB on the cloud.
 6. **Analysis & Visualization**:  Data is analyzed and visualized using Grafana Cloud, providing real-time insights and dashboards for monitoring user metrics and trends.
 
 ## Project Architecture
-- **Python Script**: Fetches JSON data from RandomUser API and saves it to the local file system.
-- **Apache Flume**: Captures JSON data from the file system, sends it to Kafka, and writes a copy to HDFS.
+- **Python Script**: Simulates and stream car transaction data to a Kafka topic while providing an API endpoint to receive and log custom messages into Kafka.
 - **Apache Kafka**: Manages data streaming and messaging between producers and consumers.
+- **Apache Flume**: Stream data from a Kafka topic to an HDFS directory using Apache Flume, with a memory channel to buffer data between the source and sink.
 - **Apache Spark**: Consumes data from Kafka for real-time processing.
 - **InfluxDB**: Stores processed data for analytics and visualization on the cloud.
 - **Grafana Cloud**:  Provides a platform for visualizing and analyzing data stored in InfluxDB, enabling the creation of interactive dashboards and reports to monitor user metrics and trends in real-time.
 
-![Project Architecture Diagram](https://github.com/WadyOsama/Processing-API-Using-Big-Data-Tools/blob/main/Project_Diagram.gif)
+![Project Architecture Diagram]<img width="957" alt="image" src="https://github.com/user-attachments/assets/d6b35a7c-cd63-447a-8da3-5267f880ff4a">)
 
 ---
 
@@ -40,136 +40,101 @@ Adjust this project's files (Configurations & Python Scripts) to match your setu
 
 ## Project Setup
 
-### 1. Python Script for Data Collection
+### 1. Python Script for generate logs and flask API with kafka producer
 This script pulls user data from the RandomUser API and saves it to a specified local directory.
 
-**`connection_script.py`**
+**`generate_logs.py`**
 ```python
-# connection_script.py
-import requests
+# generate_logs.py
+from flask import Flask, request, jsonify, Response
+from kafka import KafkaProducer
+import random
+import uuid
 import time
 import json
-import os
-from datetime import datetime
 
-# Directory to save response files
-output_dir = "/home/bigdata/api_logs"	#Modify this to match your desired directory
-os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
+app = Flask(__name__)
 
-while True:
+# Kafka configuration - Update with broker and topic details
+KAFKA_BROKER = 'localhost:9092'  # Kafka broker address
+TOPIC = 'car-transactions-logs'  # Kafka topic name
+
+# Initialize Kafka Producer with error handling
+try:
+    producer = KafkaProducer(
+        bootstrap_servers=[KAFKA_BROKER],
+        value_serializer=lambda v: json.dumps(v).encode('utf-8')
+    )
+    print("Kafka producer created successfully.")
+except Exception as e:
+    print(f"Failed to connect to Kafka broker: {e}")
+
+# Sample data for generating realistic car transactions
+buyers = ["John Doe", "Jane Smith", "Alice Johnson", "Michael Brown", "Emily Davis"]
+car_brands_models = {"Toyota": ["Camry", "Corolla"], "Ford": ["F-150", "Mustang"]}
+colors = ["Red", "Blue", "Black"]
+countries = ["USA", "Canada", "Germany"]
+branches = ["New York", "Toronto", "Berlin"]
+years = [2015, 2016, 2017, 2018]
+
+# Generate car transaction data with realistic attributes
+def generate_car_transaction():
+    brand = random.choice(list(car_brands_models.keys()))
+    return {
+        "transaction_id": str(uuid.uuid4()),
+        "buyer_id": str(uuid.uuid4()),
+        "buyer_name": random.choice(buyers),
+        "car_brand": brand,
+        "car_model": random.choice(car_brands_models[brand]),
+        "year": random.choice(years),
+        "color": random.choice(colors),
+        "country": random.choice(countries),
+        "branch": random.choice(branches),
+        "transaction_price": round(random.uniform(20000, 80000), 2)
+    }
+
+# Endpoint to stream car transactions
+@app.route('/api/stream_car_transactions', methods=['GET'])
+def stream_car_transactions():
+    def generate_and_send_transactions():
+        start_time = time.time()
+        end_time = start_time + 300  # 5-minute streaming window
+
+        while True:
+            if time.time() >= end_time:  # Sleep after 5 minutes
+                print("Sleeping for 10 minutes...")
+                time.sleep(600)
+                start_time = time.time()
+                end_time = start_time + 300
+
+            transaction_data = generate_car_transaction()
+            try:
+                producer.send(TOPIC, transaction_data)  # Send transaction to Kafka
+                print(f"Sent transaction data to Kafka: {transaction_data}")
+            except Exception as e:
+                print(f"Error sending data to Kafka: {e}")
+
+            yield f"data:{json.dumps(transaction_data)}\n\n"  # Stream transaction
+            time.sleep(2)  # Stream interval
+
+    return Response(generate_and_send_transactions(), mimetype="text/event-stream")
+
+# Endpoint to receive custom log messages and send to Kafka
+@app.route('/api/logs', methods=['POST'])
+def log_message():
+    data = request.json
     try:
-	# Connect to the API to get a response
-        response = requests.get("https://randomuser.me/api/?nat=us")
-        if response.status_code == 200:
-            fetched_data = response.json()
-
-            # Create a unique filename based on the current timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(output_dir, f"response_{timestamp}.json")
-
-            # Write the response to a separate file
-            with open(filename, 'w') as json_file:
-                json.dump(fetched_data, json_file, indent=None)  # Pretty print JSON
-
-            print(f"Data logged to file: {filename}")
-        else:
-            print("Failed to fetch data from API")
-
+        producer.send(TOPIC, data)
+        print(f"Received log data: {data}")
+        return jsonify({"status": "success", "message": "Log received", "data": data}), 200
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Error sending log to Kafka: {e}")
+        return jsonify({"status": "error", "message": "Failed to send log to Kafka"}), 500
 
-    time.sleep(1)  # Wait for 1 seconds before the next fetch
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)  # Run Flask app on port 5000
 ```
-### 2. Configure Flume
-
-Set up Flume with two configurations:
-- The first configuration will pull data from the file generated by the Python script and send it to Kafka.
-- The second configuration will consume data from Kafka and store it in HDFS.
-
-#### Configuration 1: File Source to Kafka Sink
-
-This configuration reads from `JSON files` (the file generated by the Python script) and sends the data to a Kafka topic.
-
-**File to Kafka `api_to_kafka.conf`:**
-```properties
-# Name the components on this agent
-a1.sources = r1
-a1.sinks = k1
-a1.channels = c1
-
-# Describe/configure the source
-a1.sources.r1.type = spooldir
-a1.sources.r1.channels = c1
-
-#Modify this to match your directory
-a1.sources.r1.spoolDir = /home/bigdata/api_logs
-
-a1.sources.r1.fileHeader = true
-
-a1.sinks.k1.channel = c1
-a1.sinks.k1.type = org.apache.flume.sink.kafka.KafkaSink
-
-#Modify this to match your topic name
-a1.sinks.k1.kafka.topic = user_logs
-
-a1.sinks.k1.kafka.bootstrap.servers = localhost:9092
-a1.sinks.k1.kafka.flumeBatchSize = 20
-a1.sinks.k1.kafka.producer.acks = 1
-a1.sinks.k1.kafka.producer.linger.ms = 1
-a1.sinks.k1.kafka.producer.compression.type = snappy
-
-# Use a channel which buffers events in memory
-a1.channels.c1.type = memory
-a1.channels.c1.capacity = 1000
-a1.channels.c1.transactionCapacity = 1000
-
-# Bind the source and sink to the channel
-a1.sources.r1.channels = c1
-a1.sinks.k1.channel = c1
-```
-#### Configuration 2: Kafka Source to HDFS Sink
-
-This configuration reads data from the Kafka topic and writes it to HDFS.
-
-**Kafka to HDFS `kafka_to_hdfs.conf`:**
-```properties
-# Name the components on this agent
-a2.sources = r2
-a2.sinks = k2
-a2.channels = c2
-
-# Describe/configure the source
-a2.sources.r2.type = org.apache.flume.source.kafka.KafkaSource
-a2.sources.r2.channels = c2
-a2.sources.r2.batchSize = 5000
-a2.sources.r2.batchDurationMillis = 2000
-a2.sources.r2.kafka.bootstrap.servers = localhost:9092
-
-#Modify this to match your topic name
-a2.sources.r2.kafka.topics = user_logs
-
-# Describe the sink
-a2.sinks.k2.type = hdfs
-a2.sinks.k2.channel = c2
-
-#Modify this to match your desired HDFS directory
-a2.sinks.k2.hdfs.path = /final_project
-
-a2.sinks.k2.hdfs.filePrefix = events-
-a2.sinks.k2.hdfs.round = true
-a2.sinks.k2.hdfs.roundValue = 10
-a2.sinks.k2.hdfs.roundUnit = minute
-
-# Use a channel which buffers events in memory
-a2.channels.c2.type = memory
-a2.channels.c2.capacity = 5000
-a2.channels.c2.transactionCapacity = 5000
-
-# Bind the source and sink to the channel
-a2.sources.r2.channels = c2
-a2.sinks.k2.channel = c2
-```
-### 3. Configure Kafka
+### 2. Configure Kafka
 Set up Kafka to receive data from Flume.
 
 - Create a new topic:
@@ -179,8 +144,43 @@ Set up Kafka to receive data from Flume.
   **The project's topic name is `user_logs`**
 
   ```bash
-  kafka-topics.sh --create --topic user_logs --bootstrap-server localhost:9092
+  kafka-topics.sh --create --topic car-transactions-logs --bootstrap-server localhost:9092
   ```
+### 3. Configure Flume
+
+Set up Flume configurations:
+- The configuration will consume data from Kafka and store it in HDFS.
+  
+#### Configuration: Kafka Source to HDFS Sink
+
+This configuration reads data from the Kafka topic and writes it to HDFS.
+
+**Kafka to HDFS `kafkatohdfs.conf`:**
+```properties
+# Define agent with source, sink, and channel
+agent1.sources = kafka-source
+agent1.sinks = hdfs-sink
+agent1.channels = mem-channel
+
+# Kafka source configuration
+agent1.sources.kafka-source.type = org.apache.flume.source.kafka.KafkaSource
+agent1.sources.kafka-source.kafka.bootstrap.servers = localhost:9092  # Update with your Kafka broker address
+agent1.sources.kafka-source.kafka.topics = car-transactions-logs  # Kafka topic name
+
+# HDFS sink configuration
+agent1.sinks.hdfs-sink.type = hdfs
+agent1.sinks.hdfs-sink.hdfs.path = hdfs://localhost:9000/Cars  # HDFS path to store data
+agent1.sinks.hdfs-sink.hdfs.fileType = DataStream  # Stream data type
+agent1.sinks.hdfs-sink.hdfs.writeFormat = Text  # Output format
+agent1.sinks.hdfs-sink.hdfs.rollInterval = 60  # Time in seconds for file roll-over
+
+# Memory channel configuration
+agent1.channels.mem-channel.type = memory
+
+# Source-to-channel and sink-to-channel bindings
+agent1.sources.kafka-source.channels = mem-channel
+agent1.sinks.hdfs-sink.channel = mem-channel
+```
 ### 4. Configure Spark
 Use Spark to consume data from Kafka, process it, and send results to InfluxDB.
 
@@ -191,223 +191,113 @@ This Spark application reads data from Kafka, processes it, and writes it to Inf
 
 **Spark Application `pyspark_influx.py`:**
 ```python
-import kafka
-import requests
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, explode
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
-from io import StringIO
+from pyspark.sql import Row
+from kafka import KafkaConsumer
+import json
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 
-# Initialize Spark session with Kafka support
+# Initialize Spark session for data processing
 spark = SparkSession.builder \
-    .appName("Kafka-PySpark-Integration") \
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.0.1") \
+    .appName("KafkaToSparkCarTransactions") \
     .getOrCreate()
 
-# InfluxDB Configuration
-influxdb_url = "https://<your-influxdb-url>/api/v2/write?org=<your-org-id>&bucket=<your-bucket-name>&precision=<precision>"
-influxdb_token = "<your-influxdb-token>"
+# InfluxDB configuration - Replace these fields as needed
+influxdb_url = "https://us-east-1-1.aws.cloud2.influxdata.com"  # Your InfluxDB URL
+token = "your_token_here"  # Your InfluxDB token
+org = "your_organization"  # Your organization name in InfluxDB
+bucket = "ETL_Project"  # Name of the bucket in InfluxDB
 
-# Define Kafka Variables
-kafka_bootstrap_servers = "localhost:9092"
-kafka_topic = "user_logs"
+# Initialize InfluxDB client
+client = InfluxDBClient(url=influxdb_url, token=token, org=org)
+write_api = client.write_api(write_options=SYNCHRONOUS)
 
-# Initialize a set to track processed records
-processed_records = set()
+# Define schema for car transaction logs in Spark
+schema = ["transaction_id", "buyer_id", "buyer_name", "car_brand", "car_model", 
+          "year", "color", "country", "branch", "transaction_price"]
 
-# Structure for JSON files
-schema = StructType([
-    StructField("results", ArrayType(
-        StructType([
-            StructField("gender", StringType(), True),
-            StructField("name", StructType([
-                StructField("title", StringType(), True),
-                StructField("first", StringType(), True),
-                StructField("last", StringType(), True)
-            ]), True),
-            StructField("location", StructType([
-                StructField("street", StructType([
-                    StructField("number", IntegerType(), True),
-                    StructField("name", StringType(), True)
-                ]), True),
-                StructField("city", StringType(), True),
-                StructField("state", StringType(), True),
-                StructField("country", StringType(), True),
-                StructField("postcode", IntegerType(), True),
-                StructField("coordinates", StructType([
-                    StructField("latitude", StringType(), True),
-                    StructField("longitude", StringType(), True)
-                ]), True),
-                StructField("timezone", StructType([
-                    StructField("offset", StringType(), True),
-                    StructField("description", StringType(), True)
-                ]), True)
-            ]), True),
-            StructField("email", StringType(), True),
-            StructField("login", StructType([
-                StructField("uuid", StringType(), True),
-                StructField("username", StringType(), True),
-                StructField("password", StringType(), True),
-                StructField("salt", StringType(), True),
-                StructField("md5", StringType(), True),
-                StructField("sha1", StringType(), True),
-                StructField("sha256", StringType(), True)
-            ]), True),
-            StructField("dob", StructType([
-                StructField("date", StringType(), True),
-                StructField("age", IntegerType(), True)
-            ]), True),
-            StructField("registered", StructType([
-                StructField("date", StringType(), True),
-                StructField("age", IntegerType(), True)
-            ]), True),
-            StructField("phone", StringType(), True),
-            StructField("cell", StringType(), True),
-            StructField("id", StructType([
-                StructField("name", StringType(), True),
-                StructField("value", StringType(), True)
-            ]), True),
-            StructField("picture", StructType([
-                StructField("large", StringType(), True),
-                StructField("medium", StringType(), True),
-                StructField("thumbnail", StringType(), True)
-            ]), True),
-            StructField("nat", StringType(), True)
-        ])
-    ), True),
-    StructField("info", StructType([
-        StructField("seed", StringType(), True),
-        StructField("results", IntegerType(), True),
-        StructField("page", IntegerType(), True),
-        StructField("version", StringType(), True)
-    ]), True)
-])
-
-# Read data from Kafka
-df = spark.readStream \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
-    .option("subscribe", kafka_topic) \
-    .load()
-
-# Casting the binary data to string
-value_df = df.selectExpr("CAST(value AS STRING)")
-
-# Make it structured with the defined schema
-structured_df = value_df.select(from_json(col("value"), schema).alias("data")).select("data.*")
-
-# Flatten the file
-flattened_df = structured_df.select(
-    col("results")
-).withColumn("result", explode(col("results")))  # Flatten the results array
-
-# Extract individual fields from the exploded result
-final_df = flattened_df.select(
-    col("result.name.title"),
-    col("result.name.first"),
-    col("result.name.last"),
-    col("result.gender"),
-    col("result.email"),
-    col("result.location.street"),
-    col("result.location.city"),
-    col("result.location.state"),
-    col("result.location.country"),
-    col("result.location.postcode"),
-    col("result.location.coordinates.latitude"),
-    col("result.location.coordinates.longitude"),
-    col("result.dob.age"),
-    col("result.phone")
+# Initialize Kafka consumer for reading car transaction data
+consumer = KafkaConsumer(
+    'car-transactions-logs',  # Kafka topic name
+    bootstrap_servers='localhost:9092',  # Kafka broker address
+    auto_offset_reset='latest',
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-# Function sending the data to InfluxDB
-def write_to_influxdb(data):
-    
-    # Use email as a unique identifier
-    unique_id = data.get('email')  
-    if unique_id in processed_records:
-        return  # Skip if already processed
-    
-    # After successfully writing, add the unique ID to the processed set
-    processed_records.add(unique_id)
-    
-    # Measurement name
-    measurement = "users"
+# Accumulation of rows and configuration for batch processing
+rows = []
+batch_size = 100  # Number of records to process in each batch
+max_messages = 100  # Total messages to process before stopping
+message_count = 0  # Counter for processed messages
 
-    # Prepare tag sets
-    tags = []
-    if data.get('title'):
-        tags.append(f"title={data['title']}")
-    if data.get('gender'):
-        tags.append(f"gender={data['gender']}")
-    if data.get('email'):
-        tags.append(f"email={data['email']}")
-    
-    tags_str = ','.join(tags)
+# Process each message from Kafka
+for message in consumer:
+    data = message.value  # Deserialized data
 
-    # Prepare field sets
-    fields = []
-    if data.get('first'):
-        fields.append(f"first=\"{data['first']}\"")
-    if data.get('last'):
-        fields.append(f"last=\"{data['last']}\"")
-    if data.get('street'):
-        fields.append(f"street=\"{data['street']}\"")
-    if data.get('city'):
-        fields.append(f"city=\"{data['city']}\"")
-    if data.get('state'):
-        fields.append(f"state=\"{data['state']}\"")
-    if data.get('country'):
-        fields.append(f"country=\"{data['country']}\"")
-    if data.get('postcode'):
-        fields.append(f"postcode=\"{data['postcode']}\"")
-    if data.get('latitude'):
-        fields.append(f"latitude=\"{data['latitude']}\"")
-    if data.get('longitude'):
-        fields.append(f"longitude=\"{data['longitude']}\"")
-    if data.get('age') is not None:  # Check for None instead of empty string
-        fields.append(f"age={data['age']}")
-    if data.get('phone'):
-        fields.append(f"phone=\"{data['phone']}\"")
+    # Create a Row object for Spark with transaction details
+    row = Row(
+        transaction_id=data['transaction_id'], 
+        buyer_id=data['buyer_id'], 
+        buyer_name=data['buyer_name'], 
+        car_brand=data['car_brand'], 
+        car_model=data['car_model'], 
+        year=int(data['year']), 
+        color=data['color'], 
+        country=data['country'], 
+        branch=data['branch'], 
+        transaction_price=float(data['transaction_price'])
+    )
+    rows.append(row)
+    message_count += 1
 
-    fields_str = ','.join(fields)
+    # Process the batch when it reaches the defined batch size
+    if len(rows) == batch_size:
+        df = spark.createDataFrame(rows, schema=schema)
+        df.show()  # Show the data batch
 
-    # Combine into line protocol format
-    line_protocol_data = f"{measurement},{tags_str} {fields_str}"
+        # Write data to InfluxDB for storage and analysis
+        for row in df.collect():
+            point = Point("car_transaction_data")\
+                .tag("transaction_id", row.transaction_id)\
+                .tag("buyer_id", row.buyer_id)\
+                .tag("buyer_name", row.buyer_name)\
+                .tag("car_brand", row.car_brand)\
+                .tag("car_model", row.car_model)\
+                .tag("country", row.country)\
+                .tag("branch", row.branch)\
+                .field("year", row.year)\
+                .field("transaction_price", row.transaction_price)\
+                .field("color", row.color)
+            write_api.write(bucket=bucket, org=org, record=point)
+        rows = []  # Reset rows list for the next batch
 
-    # Prepare headers
-    headers = {
-        "Authorization": f"Token {influxdb_token}",
-        "Content-Type": "text/plain; charset=utf-8",
-    }
+    # Stop processing after reaching max_messages
+    if message_count >= max_messages:
+        print(f"Processed {max_messages} messages. Stopping.")
+        break
 
-    # Send the line protocol data to InfluxDB
-    response = requests.post(influxdb_url, data=line_protocol_data, headers=headers)
-    
-    # Tracking the request result
-    if response.status_code != 204:
-        print(f"Error writing to InfluxDB: {response.text}")
-    else:
-        print('Done!')
+# Process any remaining rows
+if rows:
+    df = spark.createDataFrame(rows, schema=schema)
+    df.show()
+    for row in df.collect():
+        point = Point("car_transaction_data")\
+            .tag("transaction_id", row.transaction_id)\
+            .tag("buyer_id", row.buyer_id)\
+            .tag("buyer_name", row.buyer_name)\
+            .tag("car_brand", row.car_brand)\
+            .tag("car_model", row.car_model)\
+            .tag("country", row.country)\
+            .tag("branch", row.branch)\
+            .field("year", row.year)\
+            .field("transaction_price", row.transaction_price)\
+            .field("color", row.color)
+        write_api.write(bucket=bucket, org=org, record=point)
 
-# Function to process every batch of data
-def process_batch(batch_df, batch_id):
-    for row in batch_df.collect():
-        # Convert row to dictionary
-        data = row.asDict()
-        # Write each record to InfluxDB
-        write_to_influxdb(data)
-
-# Process the streaming data
-query = final_df.writeStream \
-    .outputMode("append") \
-    .foreachBatch(process_batch) \
-    .start()
-
-# Await termination
-query.awaitTermination()
-
-# Stop the Spark session
-spark.stop()
+# Clean up resources
+consumer.close()
+client.close()
 ```
 ### 5. Configure InfluxDB Cloud
 Set up InfluxDB Cloud to store processed data from Spark. 
@@ -475,7 +365,7 @@ Follow the [InfluxDB installation guide](https://docs.influxdata.com/influxdb/cl
      cd $KAFKA_HOME
      ```
      ```bash
-     bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic user_logs
+     bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic car-transactions-logs
      ```
 3. **Put Flume config files in config directory**:
      ```bash
@@ -484,12 +374,9 @@ Follow the [InfluxDB installation guide](https://docs.influxdata.com/influxdb/cl
      ```bash
      cp /<your-path>/kafka_to_hdfs.conf $FLUME_HOME/conf
      ```
-4. **Run Both of Flume Agents**:
+4. **Run Flume Agent**:
    ```bash
-   $FLUME_HOME/bin/flume-ng agent --conf conf --conf-file $FLUME_HOME/conf/api_to_kafka.conf --name a1 -Dflume.root.logger=DEBUG,console
-   ```
-   ```bash
-   $FLUME_HOME/bin/flume-ng agent --conf conf --conf-file $FLUME_HOME/conf/kafka_to_hdfs.conf --name a2 -Dflume.root.logger=DEBUG,console
+   $FLUME_HOME/bin/flume-ng agent --conf conf --conf-file $FLUME_HOME/conf/kafkatohdfs.conf --name agent1 -Dflume.root.logger=DEBUG,console
    ```
 5. **Run the Python script to fetch data**:
    ```bash
@@ -507,7 +394,7 @@ Follow the [InfluxDB installation guide](https://docs.influxdata.com/influxdb/cl
    
    Check your InfluxDB Cloud dashboard to ensure data is being written to your specified bucket.
    
-![InfluxDB Results](https://github.com/WadyOsama/Processing-API-Using-Big-Data-Tools/blob/main/My-Results/InfluxDB.jpeg)
+![InfluxDB Results]<img width="944" alt="image" src="https://github.com/user-attachments/assets/7cb76155-e105-4adc-8429-58bf228a5566">)
 
 ---
 ## Data Analysis & Visualization with Grafana
@@ -524,7 +411,7 @@ To visualize and analyze the data ingested into InfluxDB Cloud, I utilized **Gra
 
 By leveraging Grafana, I was able to enhance the analytical capabilities of my project, making the data not only accessible but also actionable.
 
-![Grafana Results](https://github.com/WadyOsama/Processing-API-Using-Big-Data-Tools/blob/main/My-Results/Grafana.jpeg)
+![Grafana Results]<img width="946" alt="image" src="https://github.com/user-attachments/assets/0e9c4a6a-7c00-44ba-9188-5db7ae2b8e0d">)
 
 
 ---
@@ -545,7 +432,6 @@ This project successfully establishes a real-time data pipeline using Flume, Kaf
 
 ## Acknowledgments
 
-- [RandomUser API](https://randomuser.me/) for providing the data generation API.
 - [Apache Flume](https://flume.apache.org/) for its data ingestion capabilities.
 - [Apache Kafka](https://kafka.apache.org/) for managing data streaming.
 - [Apache Spark](https://spark.apache.org/) for real-time data processing.
