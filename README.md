@@ -18,7 +18,7 @@ This project demonstrates a data engineering pipeline designed on CentOS 6.5 wit
 - **InfluxDB**: Stores processed data for analytics and visualization on the cloud.
 - **Grafana Cloud**:  Provides a platform for visualizing and analyzing data stored in InfluxDB, enabling the creation of interactive dashboards and reports to monitor user metrics and trends in real-time.
 
-![Project Architecture Diagram]<img width="957" alt="image" src="https://github.com/user-attachments/assets/d6b35a7c-cd63-447a-8da3-5267f880ff4a">)
+![Project Architecture Diagram]<img width="959" alt="image" src="https://github.com/user-attachments/assets/f2a09030-fb86-46e6-9343-c63471f54db3">)
 
 ---
 
